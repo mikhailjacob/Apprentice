@@ -2,9 +2,12 @@ package graph
 
 import data._
 import parse._
-import utils._
+import javaquine.Term
+import javaquine.Formula
+//import utils._
 import scala.collection.mutable.HashMap
 import scala.collection.mutable.ListBuffer
+import scala.collection.JavaConversions._
 
 object Causality {
 
@@ -14,49 +17,31 @@ object Causality {
     val usedClusters = graph.usedClusters()
     val total = usedClusters.length
 
-    // combination contains (clusterA, clusterB) where clusterA must have a path to clusterB
-    //    val combinations =
-    //      for (i <- 0 until total) yield {
-    //        val predecessors =
-    //          for (j <- 0 until total if i != j && graph.shortestDistance(usedClusters(j), usedClusters(i)) != -1) yield usedClusters(j)
-    //
-    //        (usedClusters(i), predecessors)
-    //      }
-
+    // a cluster and its possible predecessors
     val combinations = graph.links.groupBy { l => l.target }.map {
       case (cluster, preLinks) =>
         val predecessors = preLinks.map { _.source }.distinct
         (cluster, predecessors)
     }
-    
-    println(combinations.map{
-      case (cluster, predecessors) => cluster.name + " : " + predecessors.map(_.name).mkString("; ")
-    }.mkString("\n"))
 
-    //    val pr =
-    //    for (c <- combinations) yield {
-    //      val s = c._2.map(_ name)
-    //      (c._1.name, s)
-    //    }
-    //    
-    //    println(pr)
+    //    println(combinations.map {
+    //      case (cluster, predecessors) => cluster.name + " : " + predecessors.map(_.name).mkString("; ")
+    //    }.mkString("\n"))
 
-    var result = new HashMap[Cluster, List[List[Cluster]]]
+    // create the probability object
+    val prob = new EventProbability(storyList, usedClusters)
+    // contains a cluster and its causal predecessors
+    var rawCausal = new HashMap[Cluster, List[List[Cluster]]]
 
     for (pair <- combinations) {
       var c = pair._1
       var set = pair._2.toList
 
+      // MAX_OR is the maximum number of elements OR-ed together
       for (i <- 1 to MAX_OR) {
 
-        val candidates = Combinatorics.combinations(i, set)
-
-        // why would this happen? should not happen I think
-        //        if (GraphAlgo.findShortestDistance(links, a, b) == -1) {
-        //          var temp = a
-        //          a = b
-        //          b = temp
-        //        }
+        val candidates = set.combinations(i)
+        //Combinatorics.combinations(i, set)
 
         candidates foreach { can =>
           // (A or B) -> C
@@ -75,25 +60,171 @@ object Causality {
           val prob2 = storyNotAB.intersect(storyNotC).length / storyNotAB.length.toDouble
           //println(" " + pnA + " " + pnAB)
           if (prob2 > 0.9 && prob1 > 0.9 && storyNotAB.length > 3 && storyC.length > 3) {
-            val betterExplanations = result.getOrElse(c, Nil)
+            // a better explanation exists if part of the list is already causally responsible for the causal successor 
+            val betterExplanations = rawCausal.getOrElse(c, Nil)
             if (!betterExplanations.exists(x => x.filterNot(AorBList.contains(_)) isEmpty)) // no better explanation exists
             {
               //if (c.name == "use bathroom")
               println("possible causal: " + AorBList.map(_.name).mkString(" || ") + " ->, " + c.name + ", " + prob1 + ", " + prob2)
-              result += (c -> (AorBList :: betterExplanations))
+              rawCausal += (c -> (AorBList :: betterExplanations))
             }
-            //            else {
-            //              if (c.name == "use bathroom") {
-            //                println("not causal: " + AorBList.map(_.name).mkString(" || ") + " ->, " + c.name + ", " + prob1 + ", " + prob2)
-            //                println("because " + betterExplanations.filter(x => x.filterNot(AorBList.contains(_)) isEmpty).map(_.map(_.name)))
-            //              }
-            //            }
           }
         }
+
+        // this step simplifies the boolean formula.
+        // Currently it only works when MAX_OR = 2
+
+        //        result.get(c) match {
+        //          case Some(list) =>
+        //            // causal predecessors that appear in a list with two elements OR-ed together
+        //            val predecessors = list.flatMap(x => if (x.size == 2) x else Nil).distinct
+        //            for (p <- predecessors) {
+        //              if (list.count(x => x.contains(p)) >= 2) {
+        //                println("multiples")
+        //
+        //                val pairs = list.filter(x => x.contains(p)) // List of pairs that contains p
+        //
+        //                val con = pairs.flatMap(x => x) - p // List of clusters that each is OR-ed with p
+        //                print(con map (_.name))
+        //
+        //                val cStories = ORStories(List(c), storyList) // stories containing c
+        //
+        //                val s = ORNotStories(List(p), ANDStories(con, cStories)) // stories containing c and everything in con but not p
+        //                print(" : " + s.size)
+        //                val s2 = ORNotStories(con, ANDStories(List(p), cStories)) // stories containing c and p, but not everything in con
+        //                println(" reverse : " + s2.size)
+        //                if (s.size < storyList.size * 0.1 && s.size < s2.size) {
+        //                  val finalList = List(p) :: (list -- pairs)
+        //                  println("List changed to " + finalList.map(_.map(_.name).mkString(" || ") + " -> " + c.name).mkString(" \n"))
+        //                  result += (c -> finalList)
+        //                } else if (s2.size < storyList.size * 0.1 && s2.size < s.size) {
+        //                  val finalList = con.map(List(_)) ::: (list -- pairs)
+        //                  println("List changed to " + finalList.map(_.map(_.name).mkString(" || ") + " -> " + c.name).mkString(" \n"))
+        //                  result += (c -> finalList)
+        //                } else if (s2.size < storyList.size * 0.1 && s2.size == s.size) {
+        //                  // the shorter one has preference when both choices are equally good
+        //                  val finalList = List(p) :: (list -- pairs)
+        //                  println("List changed to " + finalList.map(_.map(_.name).mkString(" || ") + " -> " + c.name).mkString(" \n"))
+        //                  result += (c -> finalList)
+        //                }
+        //              }
+        //            }
+        //          case None =>
+        //        }
       }
     }
 
-    var causalLinks = result.flatMap {
+    /* we have located all causalities. I have moved the simplification here because the
+     * the Quine-McCluskey algorithm can handle terms with different length
+     * the new simplification method using the Quine-McCluskey algorithm begins here
+     */
+
+    rawCausal foreach {
+      case (causee, causers) =>
+        // the causee is a single cluster / event that is caused by the causers list
+        // the causers are a list of lists. The lists are AND-ed together, and elements in each list are OR-ed
+        // to use the QM algorithm, we first turn them into a list of list OR-ed together    
+        var formList = List[List[Cluster]]()
+        for (causer <- causers) {
+          if (formList.isEmpty) {
+            // for each element in one list, create a list
+            formList = causer.map(List(_))
+          } else {
+            var newFormList = ListBuffer[List[Cluster]]()
+            // this is multiplication
+            // we add one element to the end of each term
+            for (element <- causer; prevList <- formList) {
+              newFormList += element :: prevList
+            }
+            formList = newFormList.toList
+          }
+        }
+
+        // now we have a boolean formula before the simplification
+        // eliminate repeated elements
+        formList = formList.map(_.distinct)
+
+        // assign an index to each cluster
+        val cl2Num = new HashMap[Cluster, Int]()
+        val num2Cl = new HashMap[Int, Cluster]()
+        var max = 0
+        formList.flatMap { x => x }.distinct.foreach { cl =>
+          cl2Num += (cl -> max)
+          num2Cl += (max -> cl)
+          max += 1
+        }
+
+        val terms = formList.map { form =>
+          val array = Array.fill[Byte](max)(2) // 2 is the dont care for the term class
+          for (cl <- form) {
+            array(cl2Num(cl)) = 1
+          }
+          new Term(array)
+        }
+
+        // this list contains the final formula
+        // each list of clusters is a term in the formula, i.e. a number of elements AND-ed together
+        // the list of stories that follows is the list of stories that satisfy this term
+        // i.e. the stories that contain all these clusters
+        var formula = ListBuffer[(List[Cluster], List[Story])]()
+        var supportingStories = ListBuffer[Story]()
+        // calling the QM algorithm
+        val f = new Formula(terms)
+        f.reduceToPrimeImplicants()
+        f.reducePrimeImplicantsToSubset()
+        val reduced = f.getTerms()
+        reduced foreach { term =>
+          val arr = term.getVals()
+
+          var multiplyList = List[Cluster]()
+
+          for (i <- 0 until max) {
+            if (arr(i) == 1) {
+              val c = num2Cl(i)
+              multiplyList = c :: multiplyList
+
+            } else if (arr(i) == 0) { // currently we do not have zeros
+            }
+          }
+
+          val ands = ANDStories(multiplyList, storyList)
+
+          // now we add this to the final formula
+          supportingStories ++= ands
+          formula += ((multiplyList, ands))
+
+        }
+
+        /* sorting first according to the size of elements ANDed together
+         * and then the number of supporting stories
+         */
+
+        formula = formula.sortWith((x, y) => if (x._1.size < y._1.size) true
+        else if (x._1.size == y._1.size) {
+          if (x._2.size > y._2.size) true
+          else false
+        } else false)
+
+        supportingStories = supportingStories.distinct
+        //println("supporting count = " + supportingStories.size)
+        val total: Double = storyList.size //supportingStories.size
+        for (pair <- formula) {
+          //println("sheer size =" + (pair._2 intersect supportingStories).size)
+          val contribution = (pair._2 intersect supportingStories).size / total
+          //println("contribution = " + contribution)
+          if (contribution > 0.1) {
+            println(pair._1.map(_.name).mkString(" * ") + " + ")
+          } else
+            println("omitted: " + pair._1.map(_.name).mkString(" * ") + " + ")
+          supportingStories --= pair._2
+          //println("supporting count = " + supportingStories.size)
+        }
+        println(" = " + causee.name + "\n\n")
+    }
+
+    /* The end of simplification */
+
+    var causalLinks = rawCausal.flatMap {
       case (follower, causerList) =>
         causerList.flatMap { _.map { x => new Link(x, follower, "C") } }
     }.toList
@@ -107,6 +238,19 @@ object Causality {
 
     new Graph(graph.nodes, causalLinks ::: graph.links)
   }
+
+  //  /** find stories that do not contain anything from the clusterlist
+  //   * 
+  //   */
+  //  def NotStories(clusters: List[Cluster], storyList: List[Story]): List[Story] =
+  //    {
+  //      storyList.filter {
+  //        story =>
+  //          clusters exists {
+  //            cluster => story.members exists { x => cluster.members.contains(x) }
+  //          }
+  //      }
+  //    }
 
   /**
    * given a list of clusters (A, B, ...), find the number of stories that contains sentences in A or B or ...
@@ -128,12 +272,14 @@ object Causality {
    */
   def ORNotStories(clusters: List[Cluster], storyList: List[Story]): List[Story] =
     {
-      storyList.filterNot {
-        story =>
-          clusters exists {
-            cluster => story.members exists { x => cluster.members contains (x) }
-          }
+
+      var answer: List[Story] = storyList
+
+      for (cluster <- clusters) {
+        answer = storyList.filterNot { s => s.members.exists(cluster.members.contains(_)) }
       }
+
+      answer
     }
 
   /**
@@ -161,4 +307,49 @@ object Causality {
         }
       }
     }
+}
+
+class EventProbability(val stories: List[Story], val clusters: List[Cluster]) {
+
+  val storySize: Double = stories.size
+
+  /**
+   * returns P(not A)
+   *
+   */
+  def singleProb(cluster: Cluster): Double = {
+    val count = stories.filter(s => s.members.exists(cluster.members.contains(_))).size
+    count / storySize
+  }
+
+  /**
+   * returns P(A and B and C and...)
+   *  To computer P((not A) and (not B) and ...), use 1 - P(A or B or...)
+   */
+  def andProb(clusters: List[Cluster]): Double = {
+    val count = stories.filter { story =>
+      // for each of the clusters
+      // this story should contain one sentence from it
+      clusters.forall { cluster =>
+        story.members.exists(cluster.members.contains(_))
+      }
+    }.size
+
+    count / storySize
+  }
+
+  def orProb(clusters: List[Cluster]): Double = {
+    val count = stories.filter { story =>
+      // for one of the clusters
+      // this story should contain one sentence from it
+      clusters.exists { cluster =>
+        story.members.exists(cluster.members.contains(_))
+      }
+    }.size
+
+    count / storySize
+  }
+
+  def notProb(cluster: Cluster): Double = 1 - singleProb(cluster)
+
 }

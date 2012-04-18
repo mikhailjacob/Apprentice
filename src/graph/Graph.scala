@@ -188,10 +188,16 @@ class Graph(val nodes: List[Cluster], val links: List[Link]) extends XStreamable
     val file = new File(filename)
     val writer = new PrintWriter(new BufferedOutputStream(new FileOutputStream(file)))
     writer.println("digraph G {")
-    writer.println(causalLinks.map { l => "\"" + l.source.name + "\" -> \"" + l.target.name + "\" [style = \"dashed\"]" }.mkString("\n"))
-    writer.println(temporalLinks.map { l => "\"" + l.source.name + "\" -> \"" + l.target.name + "\"" }.mkString("\n"))
+    writer.println(temporalLinks.map { l => "\"" + l.source.name + "\" -> \"" + l.target.name + "\" [style = \"dashed\"]" }.mkString("\n"))
+    writer.println(causalLinks.map { l => "\"" + l.source.name + "\" -> \"" + l.target.name + "\"" }.mkString("\n"))
     writer.println("}")
     writer.close()
+    
+    if (!causalLinks.isEmpty){
+      println("causal links::")
+      for (cl <- causalLinks)
+        println(cl)
+    }
 
     val lastIndex = if (!filename.contains(".")) filename.length else filename.lastIndexOf(".")
     val outputName = filename.substring(0, lastIndex)
