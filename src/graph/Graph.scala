@@ -193,11 +193,11 @@ class Graph(val nodes: List[Cluster], val links: List[Link]) extends XStreamable
     writer.println("}")
     writer.close()
     
-    if (!causalLinks.isEmpty){
-      println("causal links::")
-      for (cl <- causalLinks)
-        println(cl)
-    }
+//    if (!causalLinks.isEmpty){
+//      println("causal links::")
+//      for (cl <- causalLinks)
+//        println(cl)
+//    }
 
     val lastIndex = if (!filename.contains(".")) filename.length else filename.lastIndexOf(".")
     val outputName = filename.substring(0, lastIndex)

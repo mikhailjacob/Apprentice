@@ -121,6 +121,8 @@ public class Term {
 				t.add((byte) 0);
 			} else if (c == '1') {
 				t.add((byte) 1);
+			} else if (c == 'X') {
+				t.add((byte) 2);
 			}
 		}
 		if (t.size() > 0) {

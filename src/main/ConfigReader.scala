@@ -119,7 +119,7 @@ class ConfigReader(val configFile: String) {
 
 object ConfigReader {
   def main(args: Array[String]) {
-    val reader = new ConfigReader("configMv3.txt")
+    val reader = new ConfigReader("configRt1.txt")
     val (stories, clusters) = reader.initData()
     for(s <- stories) println(s)
     val parameters = reader.allParameters()

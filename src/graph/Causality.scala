@@ -31,7 +31,7 @@ object Causality {
     // create the probability object
     val prob = new EventProbability(storyList, usedClusters)
     // contains a cluster and its causal predecessors
-    var rawCausal = new HashMap[Cluster, List[List[Cluster]]]
+    var rawCausal = new HashMap[Cluster, List[List[Cluster]]]()
 
     for (pair <- combinations) {
       var c = pair._1
@@ -118,6 +118,7 @@ object Causality {
      * the Quine-McCluskey algorithm can handle terms with different length
      * the new simplification method using the Quine-McCluskey algorithm begins here
      */
+    val realCausal = new HashMap[Cluster, List[List[Cluster]]]()
 
     rawCausal foreach {
       case (causee, causers) =>
@@ -141,102 +142,49 @@ object Causality {
         }
 
         // now we have a boolean formula before the simplification
-        // eliminate repeated elements
-        formList = formList.map(_.distinct)
-
-        // assign an index to each cluster
-        val cl2Num = new HashMap[Cluster, Int]()
-        val num2Cl = new HashMap[Int, Cluster]()
-        var max = 0
-        formList.flatMap { x => x }.distinct.foreach { cl =>
-          cl2Num += (cl -> max)
-          num2Cl += (max -> cl)
-          max += 1
+        var length = 0
+        var afterLength = formList.size
+        var formula = formList
+        if (afterLength > 1) {
+          // we record the the length before, and compare with the length after simplification.
+          // if they stop changing, the simplification has converged.
+          do {
+            length = afterLength
+            formula = simplifyFormula(formula)
+            //println("after simplification, before reduction")
+            //printFormula(formula, causee)
+            formula = discardSmallTerms(formula, storyList)
+            afterLength = formula.size
+          } while (afterLength != length)
         }
 
-        val terms = formList.map { form =>
-          val array = Array.fill[Byte](max)(2) // 2 is the dont care for the term class
-          for (cl <- form) {
-            array(cl2Num(cl)) = 1
-          }
-          new Term(array)
-        }
+        realCausal += (causee -> formula)
 
-        // this list contains the final formula
-        // each list of clusters is a term in the formula, i.e. a number of elements AND-ed together
-        // the list of stories that follows is the list of stories that satisfy this term
-        // i.e. the stories that contain all these clusters
-        var formula = ListBuffer[(List[Cluster], List[Story])]()
-        var supportingStories = ListBuffer[Story]()
-        // calling the QM algorithm
-        val f = new Formula(terms)
-        f.reduceToPrimeImplicants()
-        f.reducePrimeImplicantsToSubset()
-        val reduced = f.getTerms()
-        reduced foreach { term =>
-          val arr = term.getVals()
-
-          var multiplyList = List[Cluster]()
-
-          for (i <- 0 until max) {
-            if (arr(i) == 1) {
-              val c = num2Cl(i)
-              multiplyList = c :: multiplyList
-
-            } else if (arr(i) == 0) { // currently we do not have zeros
-            }
-          }
-
-          val ands = ANDStories(multiplyList, storyList)
-
-          // now we add this to the final formula
-          supportingStories ++= ands
-          formula += ((multiplyList, ands))
-
-        }
-
-        /* sorting first according to the size of elements ANDed together
-         * and then the number of supporting stories
-         */
-
-        formula = formula.sortWith((x, y) => if (x._1.size < y._1.size) true
-        else if (x._1.size == y._1.size) {
-          if (x._2.size > y._2.size) true
-          else false
-        } else false)
-
-        supportingStories = supportingStories.distinct
-        //println("supporting count = " + supportingStories.size)
-        val total: Double = storyList.size //supportingStories.size
-        for (pair <- formula) {
-          //println("sheer size =" + (pair._2 intersect supportingStories).size)
-          val contribution = (pair._2 intersect supportingStories).size / total
-          //println("contribution = " + contribution)
-          if (contribution > 0.1) {
-            println(pair._1.map(_.name).mkString(" * ") + " + ")
-          } else
-            println("omitted: " + pair._1.map(_.name).mkString(" * ") + " + ")
-          supportingStories --= pair._2
-          //println("supporting count = " + supportingStories.size)
-        }
-        println(" = " + causee.name + "\n\n")
+        printFormula(formula, causee)
+        println("\n")
+        //println(" -> " + causee.name)
+      /* The end of simplification */
     }
 
-    /* The end of simplification */
-
-    var causalLinks = rawCausal.flatMap {
-      case (follower, causerList) =>
-        causerList.flatMap { _.map { x => new Link(x, follower, "C") } }
+    var causalLinks = realCausal.flatMap {
+      case (causee, causers) =>
+        causers.flatMap { _.map { x => new Link(x, causee, "C") } }
     }.toList
 
     causalLinks = causalLinks.distinct
 
-    for (i <- 0 until causalLinks.length; j <- i + 1 until causalLinks.length if causalLinks(i) == causalLinks(j))
-      println(i + " " + j + " " + causalLinks(i) + "   " + causalLinks(j))
+//    for (i <- 0 until causalLinks.length; j <- i + 1 until causalLinks.length if causalLinks(i) == causalLinks(j))
+//      println(i + " " + j + " " + causalLinks(i) + "   " + causalLinks(j))
 
     //println(causalLinks.map(x => x.toString + " " + x.kind).mkString("\n"))
 
     new Graph(graph.nodes, causalLinks ::: graph.links)
+  }
+
+  private def printFormula(formula: List[List[Cluster]], causee: Cluster) {
+    var text = formula.map { _.map(_.name).mkString("( ", " * ", " )") }.mkString(" + ")
+    text += " -> " + causee.name
+    println(text)
   }
 
   //  /** find stories that do not contain anything from the clusterlist
@@ -251,6 +199,124 @@ object Causality {
   //          }
   //      }
   //    }
+
+  /**
+   * Simplifies a boolean formula using the Quine-McCluskey algorithm.
+   * Returns a new formula after simplification
+   *
+   * @argument formulaList
+   * It is a list of list of clusters. The clusters in the inner list are multiplied together.
+   * Elements in the outer list are summed together.
+   *
+   */
+  private def simplifyFormula(formulaList: List[List[Cluster]]): List[List[Cluster]] = {
+
+    // eliminate repeated elements
+    val formList = formulaList.map(_.distinct)
+
+    // assign an index to each cluster
+    val cl2Num = new HashMap[Cluster, Int]()
+    val num2Cl = new HashMap[Int, Cluster]()
+    var max = 0
+    formList.flatMap { x => x }.distinct.foreach { cl =>
+      cl2Num += (cl -> max)
+      num2Cl += (max -> cl)
+      max += 1
+    }
+
+    val terms = formList.map { form =>
+      val array = Array.fill[Byte](max)(2) // 2 is the dont care for the term class
+      for (cl <- form) {
+        array(cl2Num(cl)) = 1
+      }
+      new Term(array)
+    }
+
+    var formula = ListBuffer[List[Cluster]]()
+    // calling the QM algorithm
+    val f = new Formula(terms)
+    f.reduceToPrimeImplicants()
+    f.reducePrimeImplicantsToSubset()
+    val reduced = f.getTerms()
+
+    reduced foreach { term =>
+      val arr = term.getVals()
+
+      var multiplyList = List[Cluster]()
+
+      for (i <- 0 until max) {
+        if (arr(i) == 1) {
+          val c = num2Cl(i)
+          multiplyList = c :: multiplyList
+
+        } else if (arr(i) == 0) { // currently we do not have zeros
+        }
+      }
+      formula += multiplyList
+    }
+
+    formula.toList
+  }
+
+  /**
+   * From a boolean formula (AB + CD + EFG + H), this function discards terms that add too few stories
+   *  to matter.
+   * Returns the result formula
+   *
+   *
+   */
+  private def discardSmallTerms(formula: List[List[Cluster]], storyList: List[Story]): List[List[Cluster]] = {
+
+    // this list contains the final formula
+    // each list of clusters is a term in the formula, i.e. a number of elements AND-ed together
+    // the list of stories that follows is the list of stories that satisfy this term
+    // i.e. the stories that contain all these clusters
+    var supportedFormula = ListBuffer[(List[Cluster], List[Story])]()
+    var supportingStories = ListBuffer[Story]()
+
+    for (item <- formula) {
+      val ands = ANDStories(item, storyList)
+      // now we add this to the final formula
+      supportingStories ++= ands
+      supportedFormula += ((item, ands))
+    }
+
+    /* sorting first according to the size of elements ANDed together
+     * and then the number of supporting stories
+     */
+
+    supportedFormula = supportedFormula.sortWith {
+      (x, y) =>
+        if (x._1.size < y._1.size) true
+        else if (x._1.size == y._1.size) {
+          if (x._2.size > y._2.size) true
+          else false
+        } else false
+    }
+
+    supportingStories = supportingStories.distinct
+    //println("supporting count = " + supportingStories.size)
+
+    val answer = ListBuffer[List[Cluster]]()
+
+    val total: Double = storyList.size //supportingStories.size
+    for (pair <- supportedFormula) {
+      //println("sheer size =" + (pair._2 intersect supportingStories).size)
+      val contribution = (pair._2 intersect supportingStories).size / total
+      //println("contribution = " + contribution)
+      if (contribution > 0.05) {
+        //println(pair._1.map(_.name).mkString(" * ") + " + ")
+        answer += pair._1
+      } else {
+        println("omitted: " + pair._1.map(_.name).mkString(" * ") + " + ")
+      }
+      supportingStories --= pair._2
+      //println("supporting count = " + supportingStories.size)
+    }
+    //println(" = " + causee.name + "\n\n")
+
+    answer.toList
+  }
 
   /**
    * given a list of clusters (A, B, ...), find the number of stories that contains sentences in A or B or ...
