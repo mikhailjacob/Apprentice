@@ -12,17 +12,26 @@ import scala.collection.JavaConversions._
 object Causality {
 
   val MAX_OR = 2
+  
+  val CAUSAL_THRESHOLD = 0.9
 
   def findCausal(storyList: List[Story], graph: Graph): Graph = {
     val usedClusters = graph.usedClusters()
     val total = usedClusters.length
 
     // a cluster and its possible predecessors
-    val combinations = graph.links.groupBy { l => l.target }.map {
+    
+    
+    val combinations = graph.links.filter(_.isTemporal).groupBy { l => l.target }.map {
       case (cluster, preLinks) =>
         val predecessors = preLinks.map { _.source }.distinct
         (cluster, predecessors)
     }
+    
+//    val combinations = usedClusters.map{x => 
+//    	val predecessors = usedClusters.filter(y => graph.shortestDistance(y, x) != -1)
+//    	(x, predecessors)
+//    }
 
     //    println(combinations.map {
     //      case (cluster, predecessors) => cluster.name + " : " + predecessors.map(_.name).mkString("; ")
@@ -59,7 +68,10 @@ object Causality {
           val storyNotAB = ORNotStories(AorBList, storyList)
           val prob2 = storyNotAB.intersect(storyNotC).length / storyNotAB.length.toDouble
           //println(" " + pnA + " " + pnAB)
-          if (prob2 > 0.9 && prob1 > 0.9 && storyNotAB.length > 3 && storyC.length > 3) {
+          if (
+              //prob2 > CAUSAL_THRESHOLD && prob1 > CAUSAL_THRESHOLD &&
+              prob2 * prob1 > 0.78 &&
+              storyNotAB.length > 3 && storyC.length > 3) {
             // a better explanation exists if part of the list is already causally responsible for the causal successor 
             val betterExplanations = rawCausal.getOrElse(c, Nil)
             if (!betterExplanations.exists(x => x.filterNot(AorBList.contains(_)) isEmpty)) // no better explanation exists

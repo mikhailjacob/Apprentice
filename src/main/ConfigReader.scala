@@ -55,7 +55,7 @@ class ConfigReader(val configFile: String) {
       println("using cluster file: " + clusterFile)
       val clusterList: List[Cluster] = initClusters(storyList, clusterFile)
 
-      storyList = filterUnused(storyList, clusterList)
+      //storyList = filterUnused(storyList, clusterList)
       (storyList, clusterList)
     }
 
